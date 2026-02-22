@@ -57,10 +57,27 @@ def get_timeline(repo_id):
 
 def fetch_repo(owner, repo):
     url = f"https://api.github.com/repos/{owner}/{repo}"
-    response = requests.get(url)
 
+    token = os.getenv("GITHUB_TOKEN")
+
+    headers = {}
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    response = requests.get(url, headers=headers)
+
+    # 🔍 DEBUG LOGS
+    print("==== GITHUB DEBUG ====")
+    print("URL:", url)
+    print("TOKEN PRESENT:", bool(token))
+    print("STATUS:", response.status_code)
+    print("RESPONSE:", response.text)
+    print("RATE LIMIT:", response.headers.get("X-RateLimit-Remaining"))
+    print("======================")
+
+    # 🔥 REAL ERROR
     if response.status_code != 200:
-        raise Exception("Repository not found")
+        raise Exception(f"GitHub API error: {response.status_code} - {response.text}")
 
     return response.json()
 
