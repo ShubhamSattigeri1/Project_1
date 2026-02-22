@@ -245,7 +245,7 @@ async function analyze() {
     document.getElementById("dashboard").style.display = "none";
 
     try {
-        const res = await fetch("http://localhost:8000/analyze", {
+        const res = await fetch(("https://project-1-ikdf.onrender.com/analyze"), {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({ owner, repo, consent: true })
