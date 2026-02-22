@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AI Repo Dashboard</title>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    font-family: Arial;
+    background: #0f172a;
+    color: white;
+    margin: 0;
+}
+
+.container {
+    max-width: 900px;
+    margin: 40px auto;
+}
+
+h1 {
+    text-align: center;
+}
+
+.card {
+    background: #1e293b;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+input {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 8px;
+    border: none;
+    background: #334155;
+    color: white;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 10px;
+    background: #2563eb;
+    border: none;
+    border-radius: 8px;
+    color: white;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #1d4ed8;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+}
+
+.metric {
+    background: #334155;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.metric h3 {
+    margin: 5px 0;
+    font-size: 22px;
+}
+
+.badge {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-weight: bold;
+}
+
+.ACTIVE { background: #16a34a; }
+.RECENT { background: #4b83bc; }
+.STALE { background: #facc15; color: black; }
+.DORMANT { background: #ef4444; }
+
+.report {
+    white-space: pre-wrap;
+    line-height: 1.6;
+}
+
+.loader {
+    text-align: center;
+    margin-top: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🚀 AI Repository Dashboard</h1>
+
+<!-- INPUT CARD -->
+<div class="card">
+    <input id="owner" placeholder="GitHub Username">
+    <input id="repo" placeholder="Repository Name">
+
+    <label>
+        <input type="checkbox" id="consent"> This webpage is just for fun build by a 19 yr old kid this also can make mistake this checkbox is just for your concent that you have granted the permission to use this webpage.
+    </label>
+
+    <button onclick="analyze()">Analyze Repository</button>
+</div>
+
+<div id="loading" class="loader"></div>
+
+<!-- DASHBOARD -->
+<div id="dashboard" style="display:none">
+
+<!-- HEADER -->
+<div class="card">
+    <h2 id="repoName"></h2>
+    <span id="healthBadge" class="badge"></span>
+</div>
+
+<!-- METRICS -->
+<div class="grid">
+
+    <div class="metric">
+        <h3 id="stars">0</h3>
+        <p>Stars</p>
+    </div>
+
+    <div class="metric">
+        <h3 id="forks">0</h3>
+        <p>Forks</p>
+    </div>
+
+    <div class="metric">
+        <h3 id="days">0</h3>
+        <p>Days Since Update</p>
+    </div>
+
+    <div class="metric">
+        <h3 id="language">-</h3>
+        <p>Language</p>
+    </div>
+
+</div>
+
+<!-- TIMELINE CHART -->
+<div class="card">
+    <h3>📈 Repo Health Timeline</h3>
+    <canvas id="timelineChart"></canvas>
+</div>
+
+<!-- REPORT -->
+<div class="card">
+    <h3>📄 Analysis Report</h3>
+    <div id="report" class="report"></div>
+</div>
+
+</div>
+
+</div>
+
+<script>
+let chart = null;
+
+// Map health to numeric value
+function mapHealth(state) {
+    const mapping = {
+        "ACTIVE": 4,
+        "RECENT": 3,
+        "STALE": 2,
+        "DORMANT": 1
+    };
+    return mapping[state] || 0;
+}
+
+// Render chart
+function renderChart(timeline) {
+    const labels = timeline.map(t => t.period_date);
+    const data = timeline.map(t => mapHealth(t.health_state));
+
+    const ctx = document.getElementById("timelineChart");
+
+    if (chart) {
+        chart.destroy();
+    }
+
+    chart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "Health",
+                data: data,
+                borderColor: "#2563eb",
+                fill: false,
+                tension: 0.3
+            }]
+        },
+        options: {
+            scales: {
+                y: {
+                    min: 1,
+                    max: 4,
+                    ticks: {
+                        callback: function(value) {
+                            return {
+                                4: "ACTIVE",
+                                3: "RECENT",
+                                2: "STALE",
+                                1: "DORMANT"
+                            }[value];
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Main function
+async function analyze() {
+    const owner = document.getElementById("owner").value;
+    const repo = document.getElementById("repo").value;
+    const consent = document.getElementById("consent").checked;
+
+    if (!owner || !repo) {
+        alert("Please enter both fields");
+        return;
+    }
+
+    if (!consent) {
+        alert("Please accept terms");
+        return;
+    }
+
+    document.getElementById("loading").innerText = "🔍 Analyzing...";
+    document.getElementById("dashboard").style.display = "none";
+
+    try {
+        const res = await fetch("http://localhost:8000/analyze", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ owner, repo, consent: true })
+        });
+
+        const data = await res.json();
+
+        if (data.status !== "success") {
+            throw new Error(data.detail || "Unknown error");
+        }
+
+        const result = data.data;
+
+        // Repo info
+        document.getElementById("repoName").innerText = result.repo_name;
+
+        const badge = document.getElementById("healthBadge");
+        badge.innerText = result.health_state;
+        badge.className = "badge " + result.health_state;
+
+        // Metrics
+        document.getElementById("stars").innerText = result.metrics.stars;
+        document.getElementById("forks").innerText = result.metrics.forks;
+        document.getElementById("days").innerText = result.metrics.days_since_update;
+        document.getElementById("language").innerText = result.metrics.language;
+
+        // Report
+        document.getElementById("report").innerText = result.report;
+
+        // Chart
+        renderChart(result.timeline);
+
+        document.getElementById("dashboard").style.display = "block";
+
+    } catch (err) {
+        alert("Error: " + err.message);
+    }
+
+    document.getElementById("loading").innerText = "";
+}
+</script>
+<centre> 
+<label>
+        Made with combination of passion and hardwork by Shubham Sattigeri.
+        <a href="https://www.linkedin.com/in/shubham-sattigeri-116787323/">Connect Me Here...</a></centre>
+    </label>
+
+</body>
+</html>
