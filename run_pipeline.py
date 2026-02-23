@@ -1,45 +1,103 @@
 import yaml
 import psycopg2
 import requests
-from datetime import date
+from datetime import datetime, date
 import os
 import asyncio
 from groq import AsyncGroq
 from pathlib import Path
-from datetime import datetime, date
-
-def parse_github_datetime(dt_str):
-    if not dt_str:
-        return None
-    return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ")
 
 # ---------- CONFIG ----------
-
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": os.getenv("DB_PORT"),
-    "database": os.getenv("DB_NAME"),
+    "dbname": os.getenv("DB_NAME"),
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD")
 }
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
-client = AsyncGroq(api_key=GROQ_API_KEY)
 BASE_DIR = Path(__file__).resolve().parent
-
 PROMPT_PATH = BASE_DIR / "repo_health_prompt.md"
 RULES_PATH = BASE_DIR / "repo_health_rules.yaml"
 
+# ---------- LOAD RULES ----------
 with open(RULES_PATH, "r") as f:
     rules = yaml.safe_load(f)
 
 prompt_template = PROMPT_PATH.read_text()
 
+# ---------- DB CONNECTION ----------
+def get_conn():
+    return psycopg2.connect(**DB_CONFIG)
 
-# ---------- STEP 1: FETCH GITHUB DATA ----------
+
+# ---------- FETCH GITHUB ----------
+def fetch_repo(owner, repo):
+    url = f"https://api.github.com/repos/{owner}/{repo}"
+    res = requests.get(url)
+
+    if res.status_code != 200:
+        raise Exception(f"GitHub API error: {res.text}")
+
+    return res.json()
+
+
+# ---------- UPSERT ----------
+def upsert_repo(data):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    created_at = datetime.strptime(data["created_at"], "%Y-%m-%dT%H:%M:%SZ")
+    updated_at = datetime.strptime(data["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+
+    sql = """
+    INSERT INTO repo_canonical (
+        repo_name, primary_language, stars, forks, created_at, updated_at
+    )
+    VALUES (%s, %s, %s, %s, %s, %s)
+    ON CONFLICT (repo_name) DO UPDATE SET
+        primary_language = EXCLUDED.primary_language,
+        stars = EXCLUDED.stars,
+        forks = EXCLUDED.forks,
+        updated_at = EXCLUDED.updated_at
+    RETURNING repo_id;
+    """
+
+    cursor.execute(sql, (
+        data["name"],
+        data["language"],
+        data["stargazers_count"],
+        data["forks_count"],
+        created_at,
+        updated_at
+    ))
+
+    repo_id = cursor.fetchone()[0]
+    conn.commit()
+
+    # fetch full row
+    cursor.execute("SELECT * FROM repo_canonical WHERE repo_id=%s", (repo_id,))
+    row = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    return {
+        "repo_id": row[0],
+        "repo_name": row[1],
+        "primary_language": row[2],
+        "stars": row[3],
+        "forks": row[4],
+        "created_at": row[5],
+        "updated_at": row[6]
+    }
+
+
+# ---------- TIMELINE ----------
 def get_timeline(repo_id):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -54,92 +112,15 @@ def get_timeline(repo_id):
     cursor.close()
     conn.close()
 
-    return rows
+    return [{"date": str(r[0]), "state": r[1]} for r in rows]
 
 
-def fetch_repo(owner, repo):
-    url = f"https://api.github.com/repos/{owner}/{repo}"
-
-    token = os.getenv("GITHUB_TOKEN")
-
-    headers = {}
-    if token:
-        headers["Authorization"] = f"token {token}"
-
-    response = requests.get(url, headers=headers)
-
-    # 🔍 DEBUG LOGS
-    print("==== GITHUB DEBUG ====")
-    print("URL:", url)
-    print("TOKEN PRESENT:", bool(token))
-    print("STATUS:", response.status_code)
-    print("RESPONSE:", response.text)
-    print("RATE LIMIT:", response.headers.get("X-RateLimit-Remaining"))
-    print("======================")
-
-    # 🔥 REAL ERROR
-    if response.status_code != 200:
-        raise Exception(f"GitHub API error: {response.status_code} - {response.text}")
-
-    return response.json()
-
-# ---------- STEP 2: UPSERT INTO DB ----------
-def upsert_repo(data):
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()   # ✅ IMPORTANT
-
-    sql = """
-    INSERT INTO repo_canonical (
-        repo_name, primary_language, stars, forks, created_at, updated_at
-    )
-    VALUES (%s, %s, %s, %s, %s, %s)
-    ON DUPLICATE KEY UPDATE
-        primary_language = VALUES(primary_language),
-        stars = VALUES(stars),
-        forks = VALUES(forks),
-        updated_at = VALUES(updated_at)
-    """
-
-    created_at = parse_github_datetime(data["created_at"])
-    updated_at = parse_github_datetime(data["updated_at"])
-
-    cursor.execute(sql, (
-        data["name"],
-        data["language"],
-        data["stargazers_count"],
-        data["forks_count"],
-        created_at,
-        updated_at
-    ))
-
-    conn.commit()
-
-    # ✅ GET LATEST INSERTED ROW
-    cursor.execute(
-        "SELECT * FROM repo_canonical WHERE repo_name=%s ORDER BY repo_id DESC LIMIT 1",
-        (data["name"],)
-    )
-    
-    columns = [desc[0] for desc in cursor.description]
-    row = cursor.fetchone()
-    repo = dict(zip(columns, row))
-    cursor.close()
-    conn.close()
-    return repo
-
-    
-# ---------- STEP 3: BUILD PROMPT ----------
+# ---------- PROMPT ----------
 def build_prompt(repo):
-    updated_at = repo["updated_at"]
+    updated_date = repo["updated_at"].date()
+    days_since_update = (date.today() - updated_date).days
 
-    if isinstance(updated_at, datetime):
-        updated_at_date = updated_at.date()
-    else:
-        updated_at_date = updated_at
-
-    days_since_update = (date.today() - updated_at_date).days
-
-    timeline_data = get_timeline(repo["repo_id"])
+    timeline = get_timeline(repo["repo_id"])
 
     prompt = prompt_template.format(
         repo_name=repo["repo_name"],
@@ -150,13 +131,14 @@ def build_prompt(repo):
         updated_at=repo["updated_at"],
         days_since_update=days_since_update,
         rules=yaml.dump(rules, sort_keys=False),
-        timeline=str(timeline_data),
+        timeline=str(timeline),
         current_state=""
     )
 
-    return prompt, days_since_update   # ✅ FIX
+    return prompt, days_since_update, timeline
 
-# ---------- STEP 4: CALL LLM ----------
+
+# ---------- LLM ----------
 async def call_llm(prompt):
     res = await client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -169,79 +151,66 @@ async def call_llm(prompt):
     return res.choices[0].message.content
 
 
-# ---------- STEP 5: PARSE ----------
+# ---------- PARSE ----------
 def parse_output(text):
-    health_state = "UNKNOWN"
-    lines = text.splitlines()
+    state = "UNKNOWN"
 
-    for line in lines:
+    for line in text.splitlines():
         if line.lower().startswith("health state:"):
-            health_state = line.split(":")[1].strip()
+            state = line.split(":")[1].strip()
 
-    return health_state, text
+    return state, text
 
 
-# ---------- STEP 6: STORE ----------
-def store(repo_id, health_state, explanation, days_since_update):
-    conn = psycopg2.connect(**DB_CONFIG)
+# ---------- STORE ----------
+def store(repo_id, state, report, days):
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
     INSERT INTO repo_insights (
         repo_id, health_state, explanation, days_since_update, rules_version, model_name
     ) VALUES (%s, %s, %s, %s, %s, %s)
-    """, (repo_id, health_state, explanation, days_since_update, "v1", "groq"))
+    """, (repo_id, state, report, days, "v1", "groq"))
 
     cursor.execute("""
     INSERT INTO repo_health_timeline (
         repo_id, health_state, period_date, explanation
-    ) VALUES (%s, %s, CURDATE(), %s)
-    """, (repo_id, health_state, explanation))
+    ) VALUES (%s, %s, CURRENT_DATE, %s)
+    """, (repo_id, state, report))
 
     cursor.execute("""
     INSERT INTO repo_reports (repo_id, report_text)
     VALUES (%s, %s)
-    """, (repo_id, explanation))
+    """, (repo_id, report))
 
     conn.commit()
     cursor.close()
     conn.close()
 
-# ---------- MAIN PIPELINE ----------
+
+# ---------- MAIN ----------
 async def run_pipeline(owner, repo_name):
-    try:
-        data = fetch_repo(owner, repo_name)
+    data = fetch_repo(owner, repo_name)
+    repo = upsert_repo(data)
 
-        repo = upsert_repo(data)
+    prompt, days, timeline = build_prompt(repo)
 
-        if repo is None:
-            raise Exception("Failed to store repo")
+    output = await call_llm(prompt)
 
-        prompt, days_since_update = build_prompt(repo)
+    state, report = parse_output(output)
 
-        result = await call_llm(prompt)
+    store(repo["repo_id"], state, report, days)
 
-        health_state, report = parse_output(result)
-
-        store(repo["repo_id"], health_state, report, days_since_update)
-
-        # ✅ FETCH TIMELINE HERE
-        timeline = get_timeline(repo["repo_id"])
-
-        return {
-            "repo_name": repo_name,
-            "health_state": health_state,
-            "report": report,
-            "metrics": {
-                "stars": repo["stars"],
-                "forks": repo["forks"],
-                "days_since_update": days_since_update,
-                "language": repo["primary_language"],
-            },
-            "timeline": timeline   # ✅ FIXED
-        }
-
-    except Exception as e:
-        print("ERROR:", e)   # 🔥 VERY IMPORTANT FOR DEBUG
-        raise Exception(f"Pipeline error: {str(e)}")
-    
+    return {
+        "repo_name": repo_name,
+        "health_state": state,
+        "report": report,
+        "metrics": {
+            "stars": repo["stars"],
+            "forks": repo["forks"],
+            "days_since_update": days,
+            "language": repo["primary_language"],
+        },
+        "timeline": timeline
+    }
