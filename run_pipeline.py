@@ -36,12 +36,17 @@ def get_conn():
 # ---------- FETCH GITHUB ----------
 def fetch_repo(owner, repo):
     url = f"https://api.github.com/repos/{owner}/{repo}"
-    res = requests.get(url)
+    headers = {
+        "Authorization" : f"token {os.getenv('GITHUB_TOKEN')}",
+        "Accept": "application/vnd.github+json"
+    }
 
-    if res.status_code != 200:
-        raise Exception(f"GitHub API error: {res.text}")
+    response = requests.get(url, headers=headers)
 
-    return res.json()
+    if response.status_code != 200:
+        raise Exception(f"GitHub API error: {response.text}")
+
+    return response.json()
 
 
 # ---------- UPSERT ----------
