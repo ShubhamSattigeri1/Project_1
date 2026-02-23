@@ -1,5 +1,5 @@
 import yaml
-import mysql.connector
+import psycopg2
 import requests
 from datetime import date
 import os
@@ -14,11 +14,13 @@ def parse_github_datetime(dt_str):
     return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ")
 
 # ---------- CONFIG ----------
+
 DB_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "Sattigeri@Maang50",
-    "database": "hinduja_group"
+    "host": os.getenv("DB_HOST"),
+    "port": os.getenv("DB_PORT"),
+    "database": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD")
 }
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -37,8 +39,8 @@ prompt_template = PROMPT_PATH.read_text()
 
 # ---------- STEP 1: FETCH GITHUB DATA ----------
 def get_timeline(repo_id):
-    conn = mysql.connector.connect(**DB_CONFIG)
-    cursor = conn.cursor(dictionary=True)
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
 
     cursor.execute("""
         SELECT period_date, health_state
@@ -83,8 +85,8 @@ def fetch_repo(owner, repo):
 
 # ---------- STEP 2: UPSERT INTO DB ----------
 def upsert_repo(data):
-    conn = mysql.connector.connect(**DB_CONFIG)
-    cursor = conn.cursor(dictionary=True)   # ✅ IMPORTANT
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()   # ✅ IMPORTANT
 
     sql = """
     INSERT INTO repo_canonical (
@@ -117,12 +119,12 @@ def upsert_repo(data):
         "SELECT * FROM repo_canonical WHERE repo_name=%s ORDER BY repo_id DESC LIMIT 1",
         (data["name"],)
     )
-
-    repo = cursor.fetchone()
-
+    
+    columns = [desc[0] for desc in cursor.description]
+    row = cursor.fetchone()
+    repo = dict(zip(columns, row))
     cursor.close()
     conn.close()
-
     return repo
 
     
@@ -181,7 +183,7 @@ def parse_output(text):
 
 # ---------- STEP 6: STORE ----------
 def store(repo_id, health_state, explanation, days_since_update):
-    conn = mysql.connector.connect(**DB_CONFIG)
+    conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
     cursor.execute("""
