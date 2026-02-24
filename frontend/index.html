@@ -503,13 +503,15 @@
         }
 
         function buildApiUrl() {
+            const defaultUrl = "https://project-1-ikdf.onrender.com/analyze";
             if (window.API_BASE_URL) {
                 return window.API_BASE_URL.replace(/\/$/, "") + "/analyze";
             }
             if (window.location.protocol === "file:") {
-                return "https://project-1-ikdf.onrender.com/analyze";
+                return defaultUrl;
             }
-            return "/analyze";
+            // Default to deployed API so static hosting does not hit HTML routes.
+            return defaultUrl;
         }
 
         async function analyze() {
@@ -541,7 +543,13 @@
                     body: JSON.stringify({ owner: owner, repo: repo, consent: true })
                 });
 
-                const data = await res.json();
+                const raw = await res.text();
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch (parseErr) {
+                    throw new Error("Server returned non-JSON response. Check API URL/deployment.");
+                }
                 if (!res.ok || data.status !== "success") {
                     throw new Error(data.detail || "Request failed");
                 }
