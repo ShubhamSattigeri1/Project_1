@@ -1,297 +1,575 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>AI Repo Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Repo Health Analyzer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.5/dist/purify.min.js"></script>
+    <style>
+        :root {
+            --bg: #f4f6f4;
+            --bg-soft: #ecf2ef;
+            --surface: #ffffffcc;
+            --text: #132018;
+            --muted: #55635b;
+            --line: #d5ddd8;
+            --accent: #0f766e;
+            --accent-2: #0b8c73;
+            --danger: #a73e2a;
+            --ok: #0f7c4f;
+            --warn: #925f14;
+            --shadow: 0 20px 45px rgba(17, 37, 29, 0.12);
+            --radius: 16px;
+        }
 
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        * {
+            box-sizing: border-box;
+        }
 
-<style>
-body {
-    font-family: Arial;
-    background: #0f172a;
-    color: white;
-    margin: 0;
-}
+        body {
+            margin: 0;
+            font-family: "Space Grotesk", "Segoe UI", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(1200px 600px at 95% -10%, #d0f0e6 8%, transparent 65%),
+                radial-gradient(900px 500px at -10% 0%, #f7e7cc 5%, transparent 60%),
+                linear-gradient(170deg, var(--bg) 15%, var(--bg-soft) 85%);
+            min-height: 100vh;
+        }
 
-.container {
-    max-width: 900px;
-    margin: 40px auto;
-}
+        .wrap {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 28px 16px 42px;
+        }
 
-h1 {
-    text-align: center;
-}
+        .hero {
+            margin-bottom: 22px;
+        }
 
-.card {
-    background: #1e293b;
-    padding: 20px;
-    border-radius: 12px;
-    margin-bottom: 20px;
-}
+        h1 {
+            margin: 0 0 8px;
+            font-size: clamp(1.8rem, 1.2rem + 2vw, 2.8rem);
+            letter-spacing: -0.02em;
+        }
 
-input {
-    width: 100%;
-    padding: 10px;
-    margin-top: 10px;
-    border-radius: 8px;
-    border: none;
-    background: #334155;
-    color: white;
-}
+        .hero p {
+            margin: 0;
+            color: var(--muted);
+        }
 
-button {
-    width: 100%;
-    padding: 12px;
-    margin-top: 10px;
-    background: #2563eb;
-    border: none;
-    border-radius: 8px;
-    color: white;
-    cursor: pointer;
-}
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(4px);
+        }
 
-button:hover {
-    background: #1d4ed8;
-}
+        .controls {
+            padding: 18px;
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
 
-.grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 15px;
-}
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
 
-.metric {
-    background: #334155;
-    padding: 15px;
-    border-radius: 10px;
-    text-align: center;
-}
+        label {
+            font-size: 0.92rem;
+            color: var(--muted);
+        }
 
-.metric h3 {
-    margin: 5px 0;
-    font-size: 22px;
-}
+        input[type="text"] {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #fff;
+            color: var(--text);
+            padding: 10px 12px;
+            font: inherit;
+            outline: none;
+            transition: border-color 0.18s, box-shadow 0.18s;
+        }
 
-.badge {
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-weight: bold;
-}
+        input[type="text"]:focus {
+            border-color: #79b9aa;
+            box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+        }
 
-.ACTIVE { background: #16a34a; }
-.RECENT { background: #4b83bc; }
-.STALE { background: #facc15; color: black; }
-.DORMANT { background: #ef4444; }
+        .checkbox {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
 
-.report {
-    white-space: pre-wrap;
-    line-height: 1.6;
-}
+        .action {
+            grid-column: 1 / -1;
+        }
 
-.loader {
-    text-align: center;
-    margin-top: 20px;
-}
-</style>
+        button {
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            color: #fff;
+            padding: 11px 16px;
+            font: 700 0.95rem/1 "Space Grotesk", sans-serif;
+            cursor: pointer;
+            transition: transform 0.15s ease, filter 0.2s ease;
+        }
+
+        button:hover {
+            filter: saturate(1.1) brightness(1.03);
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        #loading {
+            margin: 14px 0;
+            min-height: 24px;
+            color: var(--muted);
+        }
+
+        .loading-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .loader-spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #d4ddd8;
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        #dashboard {
+            display: none;
+            margin-top: 16px;
+            animation: rise 0.35s ease;
+        }
+
+        @keyframes rise {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .repo-header {
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .repo-title {
+            margin: 0;
+            font-size: clamp(1.15rem, 1rem + 0.7vw, 1.5rem);
+        }
+
+        .badge {
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            border: 1px solid transparent;
+            font-family: "IBM Plex Mono", monospace;
+        }
+
+        .badge.active {
+            background: #dcfbe8;
+            color: var(--ok);
+            border-color: #9be5bd;
+        }
+
+        .badge.recent {
+            background: #f6f8d6;
+            color: #5f6318;
+            border-color: #d8dc88;
+        }
+
+        .badge.stale {
+            background: #ffeacc;
+            color: var(--warn);
+            border-color: #f4c67e;
+        }
+
+        .badge.dormant {
+            background: #ffe0db;
+            color: var(--danger);
+            border-color: #f3b3a7;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .stat {
+            padding: 12px;
+            border-radius: 13px;
+            border: 1px solid var(--line);
+            background: #fff;
+        }
+
+        .stat .k {
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-bottom: 5px;
+        }
+
+        .stat .v {
+            font-size: 1.12rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 12px;
+        }
+
+        .card {
+            border: 1px solid var(--line);
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px;
+            min-height: 250px;
+        }
+
+        .card h3 {
+            margin: 0 0 12px;
+            font-size: 1rem;
+        }
+
+        .report {
+            color: #203026;
+            line-height: 1.55;
+        }
+
+        .report p,
+        .report ul,
+        .report ol {
+            margin: 0 0 10px;
+        }
+
+        .report code {
+            font-family: "IBM Plex Mono", monospace;
+            background: #edf4f0;
+            border: 1px solid #dce5df;
+            border-radius: 7px;
+            padding: 1px 5px;
+        }
+
+        .report pre {
+            overflow-x: auto;
+            background: #edf4f0;
+            border: 1px solid #dce5df;
+            border-radius: 10px;
+            padding: 10px;
+        }
+
+        .chart-shell {
+            position: relative;
+            min-height: 285px;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .controls {
+                grid-template-columns: 1fr;
+            }
+
+            .stats {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 430px) {
+            .stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
-
 <body>
+    <main class="wrap">
+        <header class="hero">
+            <h1>Repository Health Analyzer</h1>
+            <p>Analyze repository activity, health trends, and generated markdown insights.</p>
+        </header>
 
-<div class="container">
+        <section class="panel controls">
+            <div class="field">
+                <label for="owner">GitHub Username / Org</label>
+                <input id="owner" type="text" placeholder="e.g. openai">
+            </div>
+            <div class="field">
+                <label for="repo">Repository Name</label>
+                <input id="repo" type="text" placeholder="e.g. openai-python">
+            </div>
+            <label class="checkbox" for="consent">
+                <input id="consent" type="checkbox">
+                I confirm I have the right to analyze this repository.
+            </label>
+            <div class="action">
+                <button id="analyzeButton" type="button">Analyze Repository</button>
+            </div>
+        </section>
 
-<h1>🚀 AI Repository Dashboard</h1>
+        <div id="loading" aria-live="polite"></div>
 
-<!-- INPUT CARD -->
-<div class="card">
-    <input id="owner" placeholder="GitHub Username">
-    <input id="repo" placeholder="Repository Name">
+        <section id="dashboard" class="panel">
+            <div style="padding:16px;">
+                <div class="repo-header">
+                    <h2 id="repoName" class="repo-title"></h2>
+                    <span id="healthBadge" class="badge">UNKNOWN</span>
+                </div>
 
-    <label>
-        <input type="checkbox" id="consent"> This webpage is just for fun build by a 19 yr old kid this also can make mistake this checkbox is just for your concent that you have granted the permission to use this webpage.
-    </label>
+                <div class="stats">
+                    <div class="stat">
+                        <div class="k">Stars</div>
+                        <div id="stars" class="v">-</div>
+                    </div>
+                    <div class="stat">
+                        <div class="k">Forks</div>
+                        <div id="forks" class="v">-</div>
+                    </div>
+                    <div class="stat">
+                        <div class="k">Days Since Update</div>
+                        <div id="days" class="v">-</div>
+                    </div>
+                    <div class="stat">
+                        <div class="k">Primary Language</div>
+                        <div id="language" class="v">-</div>
+                    </div>
+                </div>
 
-    <button onclick="analyze()">Analyze Repository</button>
-</div>
+                <div class="grid">
+                    <article class="card">
+                        <h3>AI Report</h3>
+                        <div id="report" class="report"></div>
+                    </article>
+                    <article class="card">
+                        <h3>Health Timeline</h3>
+                        <div class="chart-shell">
+                            <canvas id="timelineChart"></canvas>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+    </main>
 
-<div id="loading" class="loader"></div>
+    <script>
+        let chart = null;
 
-<!-- DASHBOARD -->
-<div id="dashboard" style="display:none">
+        function mapHealth(state) {
+            const mapping = {
+                ACTIVE: 4,
+                RECENT: 3,
+                STALE: 2,
+                DORMANT: 1
+            };
+            return mapping[String(state || "").toUpperCase()] || 0;
+        }
 
-<!-- HEADER -->
-<div class="card">
-    <h2 id="repoName"></h2>
-    <span id="healthBadge" class="badge"></span>
-</div>
+        function renderBadge(healthState) {
+            const badge = document.getElementById("healthBadge");
+            const normalized = String(healthState || "UNKNOWN").toUpperCase();
+            const cssState = normalized.toLowerCase();
 
-<!-- METRICS -->
-<div class="grid">
+            badge.textContent = normalized;
+            badge.className = "badge " + cssState;
+        }
 
-    <div class="metric">
-        <h3 id="stars">0</h3>
-        <p>Stars</p>
-    </div>
+        function parseMarkdown(text) {
+            const raw = String(text || "");
+            if (window.marked && typeof window.marked.parse === "function") {
+                const html = window.marked.parse(raw);
+                if (window.DOMPurify && typeof window.DOMPurify.sanitize === "function") {
+                    return window.DOMPurify.sanitize(html);
+                }
+                return html;
+            }
 
-    <div class="metric">
-        <h3 id="forks">0</h3>
-        <p>Forks</p>
-    </div>
+            const escaped = raw
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+            return escaped.replace(/\n/g, "<br>");
+        }
 
-    <div class="metric">
-        <h3 id="days">0</h3>
-        <p>Days Since Update</p>
-    </div>
+        function renderChart(timeline) {
+            const points = Array.isArray(timeline) ? timeline : [];
+            const labels = points.map((t) => t.period_date || t.date || "");
+            const data = points.map((t) => mapHealth(t.health_state || t.state));
+            const ctx = document.getElementById("timelineChart");
 
-    <div class="metric">
-        <h3 id="language">-</h3>
-        <p>Language</p>
-    </div>
+            if (!ctx || typeof Chart === "undefined") {
+                return;
+            }
 
-</div>
+            if (chart) {
+                chart.destroy();
+            }
 
-<!-- TIMELINE CHART -->
-<div class="card">
-    <h3>📈 Repo Health Timeline</h3>
-    <canvas id="timelineChart"></canvas>
-</div>
-
-<!-- REPORT -->
-<div class="card">
-    <h3>📄 Analysis Report</h3>
-    <div id="report" class="report"></div>
-</div>
-
-</div>
-
-</div>
-
-<script>
-let chart = null;
-
-// Map health to numeric value
-function mapHealth(state) {
-    const mapping = {
-        "ACTIVE": 4,
-        "RECENT": 3,
-        "STALE": 2,
-        "DORMANT": 1
-    };
-    return mapping[state] || 0;
-}
-
-// Render chart
-function renderChart(timeline) {
-    const labels = timeline.map(t => t.period_date);
-    const data = timeline.map(t => mapHealth(t.health_state));
-
-    const ctx = document.getElementById("timelineChart");
-
-    if (chart) {
-        chart.destroy();
-    }
-
-    chart = new Chart(ctx, {
-        type: "line",
-        data: {
-            labels: labels,
-            datasets: [{
-                label: "Health",
-                data: data,
-                borderColor: "#2563eb",
-                fill: false,
-                tension: 0.3
-            }]
-        },
-        options: {
-            scales: {
-                y: {
-                    min: 1,
-                    max: 4,
-                    ticks: {
-                        callback: function(value) {
-                            return {
-                                4: "ACTIVE",
-                                3: "RECENT",
-                                2: "STALE",
-                                1: "DORMANT"
-                            }[value];
+            chart = new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: "Health",
+                        data: data,
+                        borderColor: "#0f766e",
+                        backgroundColor: "rgba(15, 118, 110, 0.10)",
+                        fill: true,
+                        tension: 0.35,
+                        pointBackgroundColor: "#0f766e",
+                        pointBorderColor: "#ffffff",
+                        pointBorderWidth: 2,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            min: 1,
+                            max: 4,
+                            grid: {
+                                color: "rgba(19, 32, 24, 0.12)"
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return {
+                                        4: "ACTIVE",
+                                        3: "RECENT",
+                                        2: "STALE",
+                                        1: "DORMANT"
+                                    }[value] || "";
+                                },
+                                color: "#4c5e54"
+                            }
+                        },
+                        x: {
+                            grid: {
+                                color: "rgba(19, 32, 24, 0.07)"
+                            },
+                            ticks: {
+                                color: "#4c5e54"
+                            }
                         }
                     }
                 }
+            });
+        }
+
+        function buildApiUrl() {
+            if (window.API_BASE_URL) {
+                return window.API_BASE_URL.replace(/\/$/, "") + "/analyze";
+            }
+            if (window.location.protocol === "file:") {
+                return "https://project-1-ikdf.onrender.com/analyze";
+            }
+            return "/analyze";
+        }
+
+        async function analyze() {
+            const owner = document.getElementById("owner").value.trim();
+            const repo = document.getElementById("repo").value.trim();
+            const consent = document.getElementById("consent").checked;
+            const loading = document.getElementById("loading");
+            const dashboard = document.getElementById("dashboard");
+
+            if (!owner || !repo) {
+                alert("Please enter both GitHub username and repository name.");
+                return;
+            }
+
+            if (!consent) {
+                alert("Please accept the terms to continue.");
+                return;
+            }
+
+            loading.innerHTML = '<div class="loading-row"><span class="loader-spinner"></span><span>Analyzing repository...</span></div>';
+            dashboard.style.display = "none";
+
+            try {
+                const res = await fetch(buildApiUrl(), {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ owner: owner, repo: repo, consent: true })
+                });
+
+                const data = await res.json();
+                if (!res.ok || data.status !== "success") {
+                    throw new Error(data.detail || "Request failed");
+                }
+
+                const result = data.data || {};
+                const metrics = result.metrics || {};
+
+                document.getElementById("repoName").textContent = result.repo_name || repo;
+                renderBadge(result.health_state);
+
+                document.getElementById("stars").textContent = metrics.stars ?? "-";
+                document.getElementById("forks").textContent = metrics.forks ?? "-";
+                document.getElementById("days").textContent = metrics.days_since_update ?? "-";
+                document.getElementById("language").textContent = metrics.language || "-";
+
+                const reportEl = document.getElementById("report");
+                reportEl.innerHTML = parseMarkdown(result.report);
+
+                renderChart(result.timeline);
+                dashboard.style.display = "block";
+            } catch (err) {
+                alert("Error: " + (err && err.message ? err.message : "Unknown error"));
+            } finally {
+                loading.innerHTML = "";
             }
         }
-    });
-}
 
-// Main function
-async function analyze() {
-    const owner = document.getElementById("owner").value;
-    const repo = document.getElementById("repo").value;
-    const consent = document.getElementById("consent").checked;
-
-    if (!owner || !repo) {
-        alert("Please enter both fields");
-        return;
-    }
-
-    if (!consent) {
-        alert("Please accept terms");
-        return;
-    }
-
-    document.getElementById("loading").innerText = "🔍 Analyzing...";
-    document.getElementById("dashboard").style.display = "none";
-
-    try {
-        const res = await fetch(("https://project-1-ikdf.onrender.com/analyze"), {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ owner, repo, consent: true })
-        });
-
-        const data = await res.json();
-
-        if (data.status !== "success") {
-            throw new Error(data.detail || "Unknown error");
-        }
-
-        const result = data.data;
-
-        // Repo info
-        document.getElementById("repoName").innerText = result.repo_name;
-
-        const badge = document.getElementById("healthBadge");
-        badge.innerText = result.health_state;
-        badge.className = "badge " + result.health_state;
-
-        // Metrics
-        document.getElementById("stars").innerText = result.metrics.stars;
-        document.getElementById("forks").innerText = result.metrics.forks;
-        document.getElementById("days").innerText = result.metrics.days_since_update;
-        document.getElementById("language").innerText = result.metrics.language;
-
-        // Report
-        document.getElementById("report").innerText = result.report;
-
-        // Chart
-        renderChart(result.timeline);
-
-        document.getElementById("dashboard").style.display = "block";
-
-    } catch (err) {
-        alert("Error: " + err.message);
-    }
-
-    document.getElementById("loading").innerText = "";
-}
-</script>
-<centre> 
-<label>
-        Made with combination of passion and hardwork by Shubham Sattigeri.
-        <a href="https://www.linkedin.com/in/shubham-sattigeri-116787323/">Connect Me Here...</a></centre>
-    </label>
-
+        document.getElementById("analyzeButton").addEventListener("click", analyze);
+    </script>
 </body>
 </html>
